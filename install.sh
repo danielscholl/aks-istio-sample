@@ -2,7 +2,6 @@
 
 # Debug output
 echo "Script started"
-set -x
 
 # AKS with Istio Setup Script
 # This script automates the setup of an AKS cluster with Istio and configures
@@ -21,7 +20,7 @@ BLUE='\033[0;34m'  # For TRACE logs
 NC='\033[0m' # No Color
 
 # Log level (can be set to INFO to hide TRACE messages)
-LOG_LEVEL=${LOG_LEVEL:-"TRACE"}  # Default to TRACE if not set
+export LOG_LEVEL=${LOG_LEVEL:-"TRACE"}  # Default to TRACE if not set
 
 # --------------------------
 # CONFIGURATION VARIABLES
@@ -63,7 +62,7 @@ log() { echo -e "${GREEN}[INFO]${NC} $1"; }
 warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
 error() { echo -e "${RED}[ERROR]${NC} $1"; exit 1; }
 trace() { 
-  if [[ "$LOG_LEVEL" == "TRACE" ]]; then
+  if [[ "${LOG_LEVEL}" == "TRACE" ]]; then
     echo -e "${BLUE}[TRACE]${NC} $1"
   fi
 }
@@ -642,7 +641,6 @@ show_help() {
 main() {
   echo -e "${GREEN}=== AKS with Istio Setup Script ===${NC}"
   echo ""
-  set -x
   
   # Parse command line arguments
   UNIQUE_ID=""
