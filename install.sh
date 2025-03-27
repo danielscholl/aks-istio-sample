@@ -21,7 +21,7 @@ BLUE='\033[0;34m'  # For TRACE logs
 NC='\033[0m' # No Color
 
 # Log level (can be set to INFO to hide TRACE messages)
-LOG_LEVEL=${LOG_LEVEL:-"INFO"}  # Default to TRACE if not set
+LOG_LEVEL=${LOG_LEVEL:-"TRACE"}  # Default to TRACE if not set
 
 # --------------------------
 # CONFIGURATION VARIABLES
@@ -62,7 +62,11 @@ generate_config() {
 log() { echo -e "${GREEN}[INFO]${NC} $1"; }
 warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
 error() { echo -e "${RED}[ERROR]${NC} $1"; exit 1; }
-trace() { [[ "$LOG_LEVEL" == "TRACE" ]] && echo -e "${BLUE}[TRACE]${NC} $1"; }
+trace() { 
+  if [[ "$LOG_LEVEL" == "TRACE" ]]; then
+    echo -e "${BLUE}[TRACE]${NC} $1"
+  fi
+}
 
 # Verify required arguments are provided
 verify() {
