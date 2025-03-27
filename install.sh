@@ -568,7 +568,7 @@ deploy_sample_app() {
   
   # Add a delay to allow for full initialization and propagation
   log "Waiting for application to fully initialize..."
-  sleep 30
+  sleep 60
   
   log "Sample application deployed successfully."
 }
