@@ -20,10 +20,7 @@ az login
 If you want to run the entire setup automatically, you can use our script directly from GitHub:
 
 ```bash
-# Run with default settings (random unique ID)
 curl -s https://raw.githubusercontent.com/danielscholl/aks-istio-sample/refs/heads/main/install.sh | bash
-
-
 ```
 
 The script will handle all the steps described in this guide automatically. It includes:
