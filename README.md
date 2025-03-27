@@ -15,6 +15,32 @@ Also, make sure you're logged into Azure:
 az login
 ```
 
+## Quick Start
+
+If you want to run the entire setup automatically, you can use our script directly from GitHub:
+
+```bash
+# Run with default settings (random unique ID)
+curl -s https://raw.githubusercontent.com/danielscholl/aks-istio-sample/refs/heads/main/install.sh | bash
+
+
+```
+
+The script will handle all the steps described in this guide automatically. It includes:
+- Resource group and AKS cluster creation
+- Istio and Gateway API installation
+- Cert-manager setup
+- Let's Encrypt certificate configuration
+- Gateway configuration
+- Sample application deployment
+- Health checks and testing
+
+**Note:** The script uses Let's Encrypt staging certificates by default. To use production certificates, you can set the environment variable before running:
+```bash
+export LETSENCRYPT_ISSUER_TYPE="production"
+curl -s https://raw.githubusercontent.com/danielscholl/aks-istio-sample/refs/heads/main/test.sh | bash
+```
+
 ## Understanding the Components
 
 Before we start, let's understand the key components we'll be working with:
