@@ -77,7 +77,7 @@ az aks get-credentials \
 - **Network Policy**: Enables microsegmentation with the overlay plugin
 - **Pod Capacity**: Configured with 50 pods per node for better resource utilization
 
-### Step 2: Install Istio and Gateway API
+### Step 2: Install Istio and configure DNS
 
 Next, we'll install Istio service mesh and the Gateway API CRDs:
 
