@@ -20,7 +20,7 @@ az login
 If you want to run the entire setup automatically, you can use our script directly from GitHub:
 
 ```bash
-curl -s https://raw.githubusercontent.com/danielscholl/aks-istio-sample/main/install.sh | bash
+curl https://raw.githubusercontent.com/danielscholl/aks-istio-sample/refs/heads/main/install.sh | bash
 ```
 
 **Important Notes:**
@@ -38,11 +38,6 @@ The script will handle all the steps described in this guide automatically. It i
 - Sample application deployment
 - Health checks and testing
 
-**Note:** The script uses Let's Encrypt staging certificates by default. To use production certificates, you can set the environment variable before running:
-```bash
-export LETSENCRYPT_ISSUER_TYPE="production"
-curl -s https://raw.githubusercontent.com/danielscholl/aks-istio-sample/refs/heads/main/install.sh | bash
-```
 
 ## Understanding the Components
 
