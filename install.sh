@@ -702,6 +702,4 @@ main() {
 }
 
 # Run the script
-if [[ "${BASH_SOURCE[0]}" == "${0}" ]] || [[ "${BASH_SOURCE[0]}" == "/dev/stdin" ]]; then
-  main "$@"
-fi
+main "$@"
