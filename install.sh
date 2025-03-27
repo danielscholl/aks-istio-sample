@@ -1,4 +1,8 @@
-#!/bin/bash
+#!/usr/bin/env bash
+
+# Debug output
+echo "Script started"
+set -x
 
 # AKS with Istio Setup Script
 # This script automates the setup of an AKS cluster with Istio and configures
