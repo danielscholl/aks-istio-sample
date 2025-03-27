@@ -634,6 +634,7 @@ show_help() {
 main() {
   echo -e "${GREEN}=== AKS with Istio Setup Script ===${NC}"
   echo ""
+  set -x
   
   # Parse command line arguments
   UNIQUE_ID=""
