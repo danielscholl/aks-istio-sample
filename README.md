@@ -1,403 +1,396 @@
-# AKS with Istio, FQDN, and HTTPS: A Complete Guide
+# AKS with Istio, OPA, and Comprehensive Policy Enforcement
 
-This guide demonstrates how to create a secure, modern Kubernetes environment on Azure using industry-standard tools and practices. You'll learn how to set up an AKS cluster with Istio service mesh, configure the Gateway API for traffic management, and implement automatic HTTPS certificate management with Let's Encrypt.
+This repository demonstrates how to build a production-ready Kubernetes platform on Azure with **end-to-end policy enforcement**. You'll learn how to implement both **infrastructure governance** and **application-level authorization** using industry-standard tools and practices.
 
-## Quick Start
+## 🎯 What This Demo Teaches
 
-For those who want to quickly deploy the complete solution:
+This is **not just another Kubernetes deployment**. This demo showcases a complete **policy-as-code** platform that addresses real-world enterprise requirements:
 
-```bash
-curl https://raw.githubusercontent.com/danielscholl/aks-istio-sample/refs/heads/main/install.sh | bash
-```
+### **🏗️ Infrastructure Governance (Azure Policy + OPA Gatekeeper)**
+- **Admission Control**: Block non-compliant resources before they enter the cluster
+- **Compliance Monitoring**: Continuously audit cluster state against policies  
+- **Resource Standards**: Enforce naming conventions, labels, resource limits, security settings
 
-**Requirements:**
-- Prerequisites installed (see below)
-- Logged into Azure (`az login`)
-- Bash shell environment
+### **🛡️ Application Authorization (OPA External AuthZ + Istio)**
+- **Layer 7 Policies**: Control HTTP requests based on headers, paths, user identity
+- **Runtime Enforcement**: Real-time authorization decisions for microservice-to-microservice calls
+- **Zero Trust Networking**: "Never trust, always verify" approach to service communication
 
-The script automates all steps in this guide, including resource creation, component installation, and configuration.
+### **🔄 Complete Policy Lifecycle**
+- **Policy Creation**: Write policies in Rego (OPA's policy language)
+- **Policy Assignment**: Deploy policies to specific services or entire clusters
+- **Policy Testing**: Validate policies work as expected with automated testing
+- **Policy Monitoring**: Observe policy decisions and violations in real-time
 
-## Prerequisites
-
-Before starting, ensure you have:
-- [Azure CLI](https://docs.microsoft.com/en-us/cli/azure/install-azure-cli) - For Azure resource management
-- [kubectl](https://kubernetes.io/docs/tasks/tools/) - For Kubernetes cluster management
-- [istioctl](https://istio.io/latest/docs/setup/getting-started/#download) - For Istio installation and management
-- [helm](https://helm.sh/docs/intro/install/) - For package management
-
-
-## Core Components
-
-This solution integrates several key technologies:
-
-| Component | Purpose | Key Benefits |
-|-----------|---------|-------------|
-| **[Azure Kubernetes Service (AKS)](https://learn.microsoft.com/en-us/azure/aks/intro-kubernetes)** | Managed Kubernetes platform | Simplified cluster operations with Azure integration |
-| **[Istio](https://istio.io/latest/docs/concepts/what-is-istio/)** | Service mesh | Traffic management, security, and observability |
-| **[Gateway API](https://gateway-api.sigs.k8s.io/)** | Traffic management | More flexible and powerful than traditional Ingress |
-| **[Cert Manager](https://cert-manager.io/docs/)** | Certificate automation | Automatic SSL/TLS certificate management |
-| **[Let's Encrypt](https://letsencrypt.org/)** | Certificate authority | Free, automated SSL/TLS certificates |
-
-## Step-by-Step Implementation
-
-### Step 1: Create Azure Resources
-
-First, let's create the necessary Azure resources with a unique identifier to avoid conflicts:
-
-```bash
-# Set variables
-RESOURCE_GROUP="istio-aks-sample"
-LOCATION="eastus"
-UNIQUE_ID=$(tr -dc 'a-z0-9' < /dev/urandom | head -c 5)
-AKS_NAME="istio-${UNIQUE_ID}-aks"
-
-# Create resource group
-az group create --name $RESOURCE_GROUP --location $LOCATION 
-
-# Create AKS cluster with managed identity and Azure CNI
-az aks create \
-  --resource-group $RESOURCE_GROUP \
-  --name $AKS_NAME \
-  --node-count 1 \
-  --enable-managed-identity \
-  --network-plugin azure \
-  --network-policy overlay \
-  --max-pods 50
-
-# Get credentials
-az aks get-credentials \
-  --resource-group $RESOURCE_GROUP \
-  --name $AKS_NAME \
-  --overwrite-existing
-```
-
-**Configuration Highlights:**
-- **Azure CNI**: Provides enhanced network performance and higher pod density compared to kubenet
-- **Managed Identity**: Secures access to Azure resources without storing credentials in the cluster
-- **Network Policy**: Enables microsegmentation with the overlay plugin
-- **Pod Capacity**: Configured with 50 pods per node for better resource utilization
-
-### Step 2: Install Istio and configure DNS
-
-Next, we'll install Istio service mesh and the Gateway API CRDs:
-
-```bash
-# Install Istio
-istioctl install --set profile=demo -y
-
-# Install Gateway API CRDs
-kubectl apply -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.2.1/standard-install.yaml
-
-# Get the Istio ingress gateway IP
-INGRESS_IP=$(kubectl get svc istio-ingressgateway -n istio-system -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
-echo "Istio ingress gateway IP: $INGRESS_IP"
-
-# Get the node resource group (where the IP is actually created)
-NODE_POOL_RESOURCE_GROUP=$(az aks show \
-  --resource-group $RESOURCE_GROUP \
-  --name $AKS_NAME \
-  --query "nodeResourceGroup" -o tsv)
-
-# Find the public IP resource in the node resource group
-IP_NAME=$(az network public-ip list \
-  --resource-group $NODE_POOL_RESOURCE_GROUP \
-  --query "[?ipAddress=='${INGRESS_IP}'].name" -o tsv)
-
-# Set DNS hostname on the IP
-az network public-ip update \
-  --resource-group $NODE_POOL_RESOURCE_GROUP \
-  --name $IP_NAME \
-  --dns-name "${UNIQUE_ID}"
-
-# Get the FQDN
-FQDN=$(az network public-ip show \
-  --resource-group $NODE_POOL_RESOURCE_GROUP \
-  --name $IP_NAME \
-  --query dnsSettings.fqdn -o tsv)
-
-echo "FQDN: $FQDN"
-```
-
-**Gateway API vs Traditional Ingress:**
-The Gateway API represents a significant advancement over the traditional Kubernetes Ingress:
-
-| Feature | Gateway API | Traditional Ingress |
-|---------|-------------|---------------------|
-| Routing Granularity | Fine-grained control | Limited flexibility |
-| Implementation Support | Multiple providers | Implementation-specific |
-| Protocol Support | Modern protocol features | Basic HTTP/HTTPS |
-| Cross-namespace Routing | Explicit with ReferenceGrant | Often implementation-specific |
-| Configuration Model | Role-oriented (separation of concerns) | Monolithic |
-
-### Step 3: Install Cert-Manager
-
-Now, let's install cert-manager to automate certificate management:
-
-```bash
-# Add Jetstack Helm repository
-helm repo add jetstack https://charts.jetstack.io
-helm repo update
-
-# Install cert-manager
-helm install cert-manager jetstack/cert-manager \
-  --namespace cert-manager \
-  --create-namespace \
-  --version v1.17.0 \
-  --set crds.enabled=true
-```
-
-**Certificate Management Benefits:**
-- **Automated Lifecycle**: Request, validation, issuance, and renewal without manual intervention
-- **Provider Integration**: Works with multiple certificate authorities (Let's Encrypt, HashiCorp Vault, etc.)
-- **Kubernetes Native**: Uses Custom Resources for certificate configuration
-- **Scalability**: Manages certificates across multiple services and ingresses
-
-### Step 4: Configure Let's Encrypt
-
-Let's set up Let's Encrypt for automated certificate issuance:
-
-```bash
-# Create the ClusterIssuer for Let's Encrypt staging
-kubectl apply -f - << EOF
-apiVersion: cert-manager.io/v1
-kind: ClusterIssuer
-metadata:
-  name: letsencrypt-staging
-spec:
-  acme:
-    server: https://acme-staging-v02.api.letsencrypt.org/directory
-    email: admin@${FQDN}
-    privateKeySecretRef:
-      name: letsencrypt-staging
-    solvers:
-    - http01:
-        ingress:
-          class: istio
-EOF
-
-# Create a Certificate resource:
-kubectl apply -f - << EOF
-apiVersion: cert-manager.io/v1
-kind: Certificate
-metadata:
-  name: istio-ingressgateway-certs
-  namespace: istio-system
-spec:
-  secretName: istio-ingressgateway-certs
-  duration: 2160h # 90 days
-  renewBefore: 360h # 15 days
-  subject:
-    organizations:
-      - Example Organization
-  commonName: ${FQDN}
-  dnsNames:
-    - ${FQDN}
-  issuerRef:
-    name: letsencrypt-staging
-    kind: ClusterIssuer
-EOF
-```
-
-**Benefits of Let's Encrypt:**
-- **Zero Cost**: Provides trusted SSL/TLS certificates completely free of charge
-- **Automated Renewal**: Certificates automatically renew before expiration (every 90 days)
-- **Widely Trusted**: Certificates are recognized by all major browsers and operating systems
-- **ACME Protocol**: Standardized protocol for certificate issuance and verification
-- **Staging Environment**: Allows testing the integration without hitting production rate limits
-
-
-### Step 5: Configure the Gateway
-
-Now, we'll set up the Gateway API components to manage traffic:
-
-#### Understanding Gateway API Components
-
-The Gateway API introduces a more structured approach to traffic management:
-
-1. **Gateway**: Defines the infrastructure entry point and listener configuration
-2. **HTTPRoute**: Defines how HTTP traffic is routed to backend services
-3. **ReferenceGrant**: Securely enables cross-namespace routing
-
-Let's create these resources:
-
-```bash
-# Configure the Gateway and HTTPRoute
-kubectl apply -f - << EOF
-apiVersion: gateway.networking.k8s.io/v1
-kind: Gateway
-metadata:
-  name: istio
-  namespace: istio-system
-spec:
-  gatewayClassName: istio
-  addresses:
-  - value: istio-ingressgateway 
-    type: Hostname
-  listeners:
-  - name: http
-    protocol: HTTP
-    port: 80
-    allowedRoutes:
-      namespaces:
-        from: All
-  - name: https
-    protocol: HTTPS
-    port: 443
-    hostname: "${FQDN}"
-    tls:
-      mode: Terminate
-      certificateRefs:
-      - kind: Secret
-        name: istio-ingressgateway-certs
-        namespace: istio-system
-    allowedRoutes:
-      namespaces:
-        from: All
----
-apiVersion: gateway.networking.k8s.io/v1
-kind: HTTPRoute
-metadata:
-  name: bookinfo
-  namespace: istio-system
-spec:
-  parentRefs:
-  - name: istio
-    namespace: istio-system
-  rules:
-  - matches:
-    - path:
-        type: Exact
-        value: /productpage
-    - path:
-        type: PathPrefix
-        value: /static
-    - path:
-        type: Exact
-        value: /login
-    - path:
-        type: Exact
-        value: /logout
-    - path:
-        type: PathPrefix
-        value: /api/v1/products
-    backendRefs:
-    - name: productpage
-      namespace: sample-app
-      port: 9080
----
-apiVersion: gateway.networking.k8s.io/v1beta1
-kind: ReferenceGrant
-metadata:
-  name: allow-istio-system
-  namespace: sample-app
-spec:
-  from:
-  - group: gateway.networking.k8s.io
-    kind: HTTPRoute
-    namespace: istio-system
-  to:
-  - group: ""
-    kind: Service
-    name: productpage
-EOF
-```
-
-**Key Configuration Features:**
-- **Multi-protocol Support**: Handles both HTTP and HTTPS traffic
-- **TLS Termination**: Uses our Let's Encrypt certificate for secure communication
-- **Path-based Routing**: Routes specific paths to the appropriate backend services
-- **Cross-namespace Security**: ReferenceGrant explicitly allows routing across namespaces
-
-**Further Resources:**
-- [Gateway API Concepts](https://gateway-api.sigs.k8s.io/concepts/)
-- [Istio Gateway Implementation](https://istio.io/latest/docs/tasks/traffic-management/ingress/gateway-api/)
-- [Cross-Namespace References](https://gateway-api.sigs.k8s.io/guides/cross-namespace/)
-
-### Step 6: Deploy the Sample Application
-
-We'll deploy the [Istio Bookinfo](https://istio.io/latest/docs/examples/bookinfo/) sample application to demonstrate the configuration:
-
-```bash
-# Create namespace and enable Istio injection
-kubectl create namespace sample-app
-kubectl label namespace sample-app istio-injection=enabled
-
-# Deploy the Bookinfo application from Istio's GitHub repository
-kubectl apply -f https://raw.githubusercontent.com/istio/istio/1.24.4/samples/bookinfo/platform/kube/bookinfo.yaml -n sample-app
-
-# Wait for pods to be ready
-kubectl wait --for=condition=Ready pods --all -n sample-app --timeout=300s
-
-# Verify the application is running by checking the product page from within the cluster
-kubectl exec "$(kubectl get pod -l app=ratings -n sample-app -o jsonpath='{.items[0].metadata.name}')" \
-  -c ratings -n sample-app \
-  -- curl -sS productpage:9080/productpage | grep -o "<title>.*</title>"
-```
-
-**Bookinfo Microservices Architecture:**
-The Bookinfo application consists of several microservices:
-- **Productpage**: Python service that calls the Details and Reviews services
-- **Details**: Ruby service providing book information
-- **Reviews**: Java service with three versions (v1, v2, v3) that call the Ratings service
-- **Ratings**: Node.js service providing book ratings data
-
-Each service is automatically injected with an Istio sidecar proxy, enabling advanced traffic management, security, and observability features.
-
-### Step 7: Test the Setup
-
-Let's verify that our application is accessible via both HTTP and HTTPS:
-
-```bash
-# Test HTTP
-curl -s "http://${FQDN}/productpage" | grep -o "<title>.*</title>"
-
-# Test HTTPS
-curl -s "https://${FQDN}/productpage" | grep -o "<title>.*</title>"
-```
-
-## Solution Architecture
-
-The architecture we've created delivers a modern, secure, and observable platform:
+## 🏛️ Architecture Overview
 
 ```mermaid
-flowchart LR
-    Internet["Internet"] --> ALB["Azure Load Balancer"]
+graph TB
+    subgraph "Internet"
+        U[Users] --> ALB[Azure Load Balancer]
+    end
     
-    subgraph AKS["AKS Cluster"]
-        Gateway["Istio Gateway\n(TLS Termination)"]
-        BookInfo["Bookinfo Services\n(with Istio sidecars)"]
-        CertManager["Cert-Manager\n(Certificate Automation)"]
+    subgraph "AKS Cluster"
+        subgraph "Policy Layer"
+            AP[Azure Policy Addon] --> GK[OPA Gatekeeper]
+            OPA[OPA External AuthZ] --> IS[Istio Sidecar Proxies]
+        end
         
-        ALB --> Gateway
-        Gateway --> BookInfo
-        CertManager -.->|provides certs| Gateway
+        subgraph "Infrastructure"
+            ALB --> IG[Istio Gateway]
+            IG --> |HTTP/HTTPS| MS[Microservices]
+            CM[Cert-Manager] --> |TLS Certs| IG
+        end
+        
+        subgraph "Applications"
+            MS --> PP[Product Page]
+            MS --> RV[Reviews Service]  
+            MS --> RT[Ratings Service]
+            MS --> DT[Details Service]
+        end
+    end
+    
+    subgraph "Azure Control Plane"
+        AP2[Azure Policy Service] --> AP
+        LE[Let's Encrypt] --> CM
+    end
+    
+    subgraph "Policy Flow"
+        GK --> |Admission Control| MS
+        OPA --> |Runtime AuthZ| MS
     end
 ```
 
-**Key Security Features:**
-- TLS encryption for all external traffic
-- Automatic certificate rotation
-- Service-to-service mutual TLS authentication
-- Network policies for microsegmentation
-- Identity-based security with managed identities
+## 🚀 Quick Start
 
-**Observability Capabilities:**
-- End-to-end distributed tracing
-- Detailed metrics for all service interactions
-- Access logs for traffic analysis
-- Service health and status monitoring
-
-
-## Cleanup
-
-When you're done testing, remove all resources to avoid unnecessary charges:
+Deploy the complete solution in one command:
 
 ```bash
-az group delete --name $RESOURCE_GROUP --yes
+# Automated deployment
+uv run poc.py
+
+# With custom settings
+uv run poc.py --unique-id myid1 --location westus2 --issuer-type staging
 ```
 
-This command deletes all resources created during this guide.
+**Prerequisites:**
+- Azure CLI logged in (`az login`)
+- Python 3.12+ with uv installed
+- **Azure Permissions Required:**
+  - Contributor or Owner role on Azure subscription (for resource creation)
+  - Policy Contributor role (for Azure Policy assignments)
+  - Microsoft.PolicyInsights resource provider registered
+- **Local Tools** (auto-installed if missing):
+  - kubectl (Kubernetes CLI)
+  - istioctl (Istio CLI)
+  - helm (Helm package manager)
+
+## 🎭 What You'll See in Action
+
+### **1. Azure Policy Assignment & Gatekeeper Integration**
+The demo assigns a **built-in Azure Policy** to demonstrate the integration:
+
+```bash
+# Policy: "Kubernetes cluster containers should not use forbidden sysctl interfaces" 
+# Policy ID: 56d0a13f-712f-466b-8416-56fb354fb823
+# Effect: Audit mode (reports violations without blocking)
+# Scope: Applied to your AKS cluster
+# Parameters: Excludes system namespaces and defines forbidden sysctl interfaces
+
+# View assigned policies
+az policy assignment list --scope /subscriptions/.../managedClusters/your-cluster
+
+# Check Gatekeeper constraint templates created by Azure Policy
+kubectl get constrainttemplates
+# Output: k8sazurecontainernoforbiddensysctls  (and others)
+
+# Note: Custom policy creation via Azure CLI has limitations - use Azure Portal for complex policies
+```
+
+### **2. OPA External Authorization in Real-Time**
+Watch **OPA make authorization decisions** for HTTP requests:
+
+```bash
+# ❌ Request to protected service WITHOUT authorization header
+kubectl exec -n sample-app opa-test-client -- curl reviews:9080/reviews/1
+# Output: HTTP 403 Forbidden (blocked by OPA)
+
+# ✅ Request WITH proper authorization header
+kubectl exec -n sample-app opa-test-client -- curl -H "x-user-authorized: true" reviews:9080/reviews/1  
+# Output: HTTP 200 OK + JSON response body (allowed by OPA)
+
+# 🔍 View OPA decision logs in real-time
+kubectl logs -n opa deployment/opa --follow
+# Output shows actual policy evaluations with allow/deny decisions
+```
+
+### **3. Live Policy Modification**
+**Modify policies and see immediate results:**
+
+```bash
+# Update the OPA policy in the ConfigMap
+kubectl edit configmap opa-policy -n opa
+
+# OPA automatically reloads - test immediately
+kubectl exec -n sample-app opa-test-client -- curl reviews:9080/reviews/1
+# See new policy behavior without restarting anything
+```
+
+## 🧠 Technical Deep Dive
+
+### **Azure Policy vs OPA External Authorization**
+
+| Aspect | Azure Policy + Gatekeeper | OPA External AuthZ |
+|--------|---------------------------|-------------------|
+| **When It Runs** | Resource creation/update time | HTTP request time |
+| **What It Controls** | Kubernetes resources | HTTP traffic |
+| **Policy Language** | Rego (via constraint templates) | Rego (direct) |
+| **Scope** | Cluster-wide governance | Service-specific authorization |
+| **Use Cases** | Resource standards, security baselines | User authentication, API access control |
+| **Performance** | No runtime overhead | Microsecond request latency |
+
+### **Key Technologies Explained**
+
+#### **🏗️ Azure Kubernetes Service (AKS)**
+- **Managed Control Plane**: Microsoft handles Kubernetes API server, scheduler, controller manager
+- **Azure Integration**: Native integration with Azure Identity, networking, storage, monitoring
+- **Enterprise Features**: Azure Policy addon, Azure Monitor, Azure AD integration, private clusters
+
+#### **🕸️ Istio Service Mesh**
+- **Traffic Management**: Advanced routing, load balancing, circuit breaking, timeouts
+- **Security**: Mutual TLS, authorization policies, certificate management
+- **Observability**: Distributed tracing, metrics collection, access logging
+- **Extension Points**: Custom filters, WebAssembly plugins, external authorization
+
+#### **📋 Open Policy Agent (OPA)**
+- **Policy Language**: Rego - declarative language designed for expressing policies
+- **Decision Engine**: Fast, lightweight evaluation of complex policies
+- **Data Integration**: Can pull external data for policy decisions (LDAP, databases, APIs)
+- **Audit Trail**: Complete logging of all policy decisions for compliance
+
+#### **🛡️ Policy Integration Points**
+
+**1. Admission Control (Azure Policy + Gatekeeper)**
+```rego
+package kubernetes.admission
+
+deny[msg] {
+    input.request.kind.kind == "Pod"
+    not input.request.object.spec.securityContext.runAsNonRoot
+    msg := "Pods must run as non-root user"
+}
+```
+
+**2. Runtime Authorization (OPA External AuthZ)**
+```rego
+package authz
+
+import rego.v1
+
+default allow := false
+
+# Allow requests with the authorization header
+allow if {
+    input.attributes.request.http.headers["x-user-authorized"] == "true"
+}
+
+# Allow GET requests to the productpage without auth for demo
+allow if {
+    input.attributes.request.http.method == "GET"
+    startswith(input.attributes.request.http.path, "/productpage")
+}
+
+# Allow requests to static resources
+allow if {
+    input.attributes.request.http.method == "GET"
+    startswith(input.attributes.request.http.path, "/static")
+}
+```
+
+## 🔬 Demo Scenarios
+
+### **Scenario 1: Blocking Non-Compliant Resources**
+The demo automatically shows Azure Policy blocking resources that don't meet governance standards:
+
+1. **Policy Assignment**: Assigns built-in Kubernetes policies to your cluster
+2. **Violation Attempt**: Tries to create a workload that violates policy
+3. **Enforcement**: Shows how Gatekeeper blocks the non-compliant resource
+4. **Compliance**: Demonstrates how to fix the issue and achieve compliance
+
+### **Scenario 2: HTTP Request Authorization**
+Watch OPA make real-time authorization decisions:
+
+1. **Service Protection**: Labels specific services for OPA protection
+2. **Policy Deployment**: Applies Rego policies that examine HTTP headers
+3. **Request Testing**: Makes requests with and without proper authorization
+4. **Decision Logging**: Shows policy evaluation logs and reasoning
+
+### **Scenario 3: Policy Modification**
+Learn how to iterate on policies:
+
+1. **Policy Update**: Modify the Rego policy in the ConfigMap
+2. **Hot Reload**: OPA automatically picks up the new policy
+3. **Testing**: Validate the new policy behavior immediately
+4. **Rollback**: Demonstrate how to quickly revert if needed
+
+## 🏭 Production Considerations
+
+### **Policy Development Lifecycle**
+
+```mermaid
+graph LR
+    A[Write Policy] --> B[Unit Test]
+    B --> C[Integration Test]
+    C --> D[Staging Deploy]
+    D --> E[Production Deploy]
+    E --> F[Monitor & Audit]
+    F --> A
+```
+
+### **High Availability Setup**
+- **OPA Replicas**: Multiple OPA instances for redundancy
+- **Policy Distribution**: Use OPA Bundles for centralized policy management
+- **Caching**: Local policy caching to handle external service outages
+- **Monitoring**: Alerts on policy decision latency and error rates
+
+### **Security Best Practices**
+- **Policy Testing**: Comprehensive test suites for all policy rules
+- **Least Privilege**: Minimal permissions for OPA service accounts
+- **Audit Logging**: Complete audit trail of all policy decisions
+- **Secrets Management**: Secure handling of policy data and tokens
+
+### **Performance Optimization**
+- **Policy Compilation**: Pre-compile policies for faster evaluation
+- **Data Caching**: Cache external data sources used in policies
+- **Request Batching**: Batch authorization requests when possible
+- **Circuit Breaking**: Fail-open policies for external dependencies
+
+## 📚 Learning Resources
+
+### **Understanding Policy-as-Code**
+- [OPA Documentation](https://www.openpolicyagent.org/docs/latest/) - Comprehensive OPA guide
+- [Rego Playground](https://play.openpolicyagent.org/) - Interactive Rego learning environment
+- [Policy Patterns](https://www.openpolicyagent.org/docs/latest/policy-reference/) - Common policy patterns and examples
+
+### **Kubernetes Security**
+- [Azure Policy for AKS](https://docs.microsoft.com/en-us/azure/governance/policy/concepts/policy-for-kubernetes) - Official Azure documentation
+- [Istio Security](https://istio.io/latest/docs/concepts/security/) - Service mesh security concepts
+- [Kubernetes Security Best Practices](https://kubernetes.io/docs/concepts/security/) - Official K8s security guide
+
+### **Advanced Topics**
+- [OPA Envoy Integration](https://www.openpolicyagent.org/docs/latest/envoy-introduction/) - Deep dive into Envoy integration
+- [Gatekeeper Constraint Templates](https://open-policy-agent.github.io/gatekeeper/website/docs/howto/) - Advanced Gatekeeper usage
+- [Istio Authorization Policies](https://istio.io/latest/docs/concepts/security/#authorization) - Native Istio authorization
+
+## ⚠️ Known Limitations
+
+### **Azure Policy Creation**
+- **Custom Policy Limitation**: Azure CLI has limitations for creating custom Kubernetes policies. Complex constraint templates should be created through the Azure Portal or REST API.
+- **Policy Propagation**: It can take up to 15 minutes for policy assignments to sync to the cluster.
+- **Built-in Policy Focus**: This demo uses built-in policies due to Azure CLI constraints, but the same principles apply to custom policies.
+
+### **OPA External AuthZ**
+- **Service Coverage**: OPA policies only apply to services labeled with `opa-authz: enabled`.
+- **Header-based Auth**: The demo implements simple header-based authorization for demonstration purposes.
+- **Performance**: Each HTTP request adds ~1-5ms latency for policy evaluation.
+
+### **General Limitations**
+- **Single Cluster**: Demo is designed for single-cluster deployment.
+- **Let's Encrypt Staging**: Use staging certificates for testing to avoid rate limits.
+- **Resource Requirements**: Minimum 2 vCPU and 4GB RAM recommended for the cluster.
+
+## 🔧 Troubleshooting
+
+### **Common Issues**
+
+#### **Policy Assignment Failures**
+```bash
+# Check policy assignment status
+az policy assignment list --scope /subscriptions/<sub-id>/resourceGroups/<rg>/providers/Microsoft.ContainerService/managedClusters/<cluster>
+
+# Verify Azure Policy addon is running
+kubectl get pods -n kube-system -l app=azure-policy
+kubectl get pods -n gatekeeper-system
+```
+
+#### **OPA Authorization Not Working**
+```bash
+# Check OPA deployment status
+kubectl get pods -n opa
+kubectl logs -n opa deployment/opa
+
+# Verify service labeling
+kubectl get pods -n sample-app --show-labels | grep opa-authz
+
+# Test OPA policy evaluation
+kubectl exec -n opa deployment/opa -- opa test /policy/policy.rego
+```
+
+#### **Certificate Issues**
+```bash
+# Check certificate status
+kubectl get certificate -n istio-system
+kubectl describe certificate istio-ingressgateway-certs -n istio-system
+
+# Check cert-manager logs
+kubectl logs -n cert-manager deployment/cert-manager
+```
+
+#### **Connectivity Issues**
+```bash
+# Check ingress gateway
+kubectl get svc -n istio-system istio-ingressgateway
+
+# Test internal connectivity
+kubectl exec -n sample-app opa-test-client -- nslookup productpage
+kubectl exec -n sample-app opa-test-client -- curl -v productpage:9080/productpage
+```
+
+### **Getting Help**
+- Check the [Azure Policy troubleshooting guide](https://docs.microsoft.com/en-us/azure/governance/policy/troubleshoot/general)
+- Review [Istio troubleshooting documentation](https://istio.io/latest/docs/ops/common-problems/)
+- Examine [OPA debugging guide](https://www.openpolicyagent.org/docs/latest/debugging/)
+
+## 🧹 Cleanup
+
+Remove all resources when finished:
+
+```bash
+# Using the demo script
+uv run poc.py --unique-id <your-id> --cleanup
+
+# Or directly with Azure CLI
+az group delete --name <resource-group-name> --yes
+```
+
+## 🤝 Contributing
+
+This demo is designed to be educational and extensible:
+
+1. **Fork the repository**
+2. **Add new policy examples** in the `policies/` directory
+3. **Extend the demo script** with additional scenarios
+4. **Submit pull requests** with improvements
+
+### **Ideas for Extensions**
+- **JWT token validation** in OPA policies
+- **External data integration** (LDAP, databases)
+- **Custom Gatekeeper constraint templates**
+- **Policy performance benchmarking**
+- **Multi-cluster policy federation**
 
 ---
 
-*This guide provides both automated deployment and step-by-step instructions to help you understand how these technologies work together. For more advanced configurations, refer to the official documentation for each component.*
+## 💡 Why This Matters
+
+In modern cloud-native environments, **security and compliance are not optional**. This demo shows how to:
+
+- **Shift security left** by enforcing policies at development time
+- **Implement zero-trust networking** with comprehensive authorization
+- **Maintain compliance** with automated policy enforcement
+- **Scale governance** across hundreds of services and teams
+- **Reduce operational overhead** with policy-as-code automation
+
+This isn't just a technical demo—it's a blueprint for building **secure, compliant, and manageable** Kubernetes platforms at enterprise scale.
+
+**Ready to build the future of cloud-native security? Let's get started! 🚀**
