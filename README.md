@@ -14,6 +14,138 @@ By running this demo, you'll understand:
 - **How OPA External AuthZ works with Istio** for HTTP request authorization
 - **The difference between policy enforcement at creation time vs. request time**
 
+## Getting Started
+
+### Prerequisites
+
+Before running this demo, you'll need to install several tools and configure your Azure environment.
+
+#### 1. Python 3.12+
+
+**macOS (using Homebrew):**
+```bash
+brew install python@3.12
+```
+
+**Windows (using winget):**
+```bash
+winget install Python.Python.3.12
+```
+
+**Linux (Ubuntu/Debian):**
+```bash
+sudo apt update
+sudo apt install python3.12 python3.12-venv python3.12-pip
+```
+
+**Linux (CentOS/RHEL/Fedora):**
+```bash
+sudo dnf install python3.12 python3.12-pip
+```
+
+#### 2. uv (Python Package Manager)
+
+Install uv for faster Python package management:
+
+```bash
+# macOS/Linux
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Windows (PowerShell)
+powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
+
+# Alternative: using pip
+pip install uv
+```
+
+#### 3. Azure CLI (≥ 2.73.0)
+
+**macOS:**
+```bash
+brew install azure-cli
+```
+
+**Windows:**
+```bash
+# Using winget
+winget install Microsoft.AzureCLI
+
+# Or download from: https://aka.ms/azure-cli
+```
+
+**Linux:**
+```bash
+# Ubuntu/Debian
+curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash
+
+# CentOS/RHEL/Fedora
+sudo rpm --import https://packages.microsoft.com/keys/microsoft.asc
+sudo dnf install azure-cli
+```
+
+#### 4. kubectl
+
+**macOS:**
+```bash
+brew install kubectl
+```
+
+**Windows:**
+```bash
+# Using winget
+winget install Kubernetes.kubectl
+
+# Or using Chocolatey
+choco install kubernetes-cli
+```
+
+**Linux:**
+```bash
+# Download latest version
+curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
+```
+
+#### 5. Azure Setup
+
+1. **Log in to Azure:**
+   ```bash
+   az login
+   ```
+
+2. **Set your subscription (if you have multiple):**
+   ```bash
+   # List available subscriptions
+   az account list --output table
+   
+   # Set the subscription you want to use
+   az account set --subscription "your-subscription-id"
+   ```
+
+3. **Verify you have Contributor access:**
+   ```bash
+   # Check your role assignments
+   az role assignment list --assignee $(az account show --query user.name -o tsv) --output table
+   ```
+
+   You should see "Contributor" or "Owner" role for the subscription or resource group you plan to use.
+
+#### 6. Verify Prerequisites
+
+The script will automatically check if all prerequisites are met when you run it:
+
+```bash
+# This will show a prerequisites check table
+uv run poc.py --help
+```
+
+### Optional Tools (Auto-installed by Script)
+
+These tools are automatically downloaded if not found:
+
+- **Istio CLI (istioctl)** - Downloaded automatically during setup
+- **Helm** - Downloaded automatically if needed
+
 ## Quick Start
 
 ```bash
